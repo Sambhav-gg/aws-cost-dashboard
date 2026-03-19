@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS Cost Dashboard with LLM Insights
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        REPORTS_TABLE: !Ref ReportsTable
+        GEMINI_API_KEY: !Ref GeminiApiKey
+
+Parameters:
+  GeminiApiKey:
+    Type: String
+    Description: Google Gemini API Key
+    NoEcho: true
+
+Resources:
+
+  # ─── API Gateway with CORS ────────────────────────────────────
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+  # ─── DynamoDB Table ───────────────────────────────────────────
+  ReportsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: reportId
+        Type: String
+
+  # ─── Lambda: Get Costs ────────────────────────────────────────
+  GetCostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/getCosts.handler
+      Description: Fetches cost data from AWS Cost Explorer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - ce:GetCostForecast
+              Resource: "*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /costs
+            Method: GET
+            RestApiId: !Ref MyApi
+
+  # ─── Lambda: Get AI Insights ──────────────────────────────────
+  GetInsightsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/getInsights.handler
+      Description: Sends cost data to Google Gemini for AI analysis
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+              Resource: "*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /insights
+            Method: GET
+            RestApiId: !Ref MyApi
+
+  # ─── Lambda: Scheduled Daily Refresh ─────────────────────────
+  ScheduledRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/scheduledRefresh.handler
+      Description: Refreshes cost report every day at 6AM UTC
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+              Resource: "*"
+      Events:
+        DailyTrigger:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 6 * * ? *)
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/"
+  ReportsTableName:
+    Description: "DynamoDB Reports Table"
+    Value: !Ref ReportsTable
