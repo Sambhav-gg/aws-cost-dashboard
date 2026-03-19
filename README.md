@@ -1,50 +1,51 @@
-# AWS Cost Dashboard with AI Insights
+# AWS Cost Dashboard
 
-A serverless AWS cost monitoring dashboard powered by Groq AI (Llama 3.3) that fetches real billing data, generates actionable cost optimization insights, and visualizes spending across AWS services.
+A production-grade serverless application that monitors your AWS spending in real time, visualizes cost breakdowns by service, and delivers AI-powered optimization recommendations using Groq's Llama 3.3 model.
+
+![Stack](https://img.shields.io/badge/AWS-Serverless-orange) ![AI](https://img.shields.io/badge/AI-Groq%20Llama%203.3-blue) ![IaC](https://img.shields.io/badge/IaC-AWS%20SAM-yellow) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-## Features
+## What It Does
 
-- Real-time AWS cost breakdown by service
-- AI-generated cost analysis and optimization recommendations (Groq · Llama 3.3)
-- Service cost comparison bar chart with color coding
-- Cost share progress table with percentage breakdown
-- 24-hour DynamoDB caching to minimize API calls and AI costs
-- Daily automated cache refresh via EventBridge scheduler
+- Pulls your real AWS billing data from Cost Explorer and breaks it down by service
+- Sends that data to Groq's Llama 3.3 model which returns a plain-English cost analysis with specific recommendations
+- Caches everything in DynamoDB so the AI is called at most once per day
+- Refreshes the cache automatically every morning at 6AM UTC via an EventBridge scheduler
+- Displays everything on a clean React dashboard with charts, a cost table, and the AI insight panel
 
 ---
 
 ## Tech Stack
 
-### Backend (AWS Serverless)
+### Backend
 
-| Service | Purpose |
+| Service | Role |
 |---|---|
-| AWS Lambda | Serverless compute — getCosts, getInsights, scheduledRefresh |
-| API Gateway | REST API with CORS — routes /costs and /insights |
-| DynamoDB | Caches cost data and AI insights with 24hr TTL |
-| Cost Explorer API | Fetches real AWS billing data grouped by service |
-| EventBridge | Cron job — refreshes cache daily at 6AM UTC |
-| IAM | Per-Lambda least-privilege roles |
-| CloudWatch | Logs and execution monitoring |
-| AWS SAM | Infrastructure as Code — one command deployment |
+| AWS Lambda | Three serverless functions — getCosts, getInsights, scheduledRefresh |
+| API Gateway | REST API entry point with CORS — exposes /costs and /insights |
+| DynamoDB | 24-hour cache for cost data and AI insights |
+| Cost Explorer API | AWS native billing data API — grouped by service |
+| EventBridge | Daily cron trigger at 6AM UTC to pre-warm cache |
+| IAM | Least-privilege role per Lambda function |
+| CloudWatch | Execution logs and monitoring |
+| AWS SAM | Infrastructure as Code — full stack in one `template.yaml` |
 
 ### Frontend
 
-| Tech | Purpose |
+| Tech | Role |
 |---|---|
-| React | UI framework |
-| Recharts | Cost visualization bar chart |
-| Axios | API calls to Lambda endpoints |
-| ReactMarkdown | Renders AI insight markdown response |
+| React | UI |
+| Recharts | Bar chart for cost by service |
+| Axios | HTTP calls to API Gateway |
+| ReactMarkdown | Renders AI response markdown |
 
 ### AI
 
-| Service | Purpose |
+| Service | Role |
 |---|---|
-| Groq API | LLM inference (free tier) |
-| Llama 3.3 70B | Cost analysis and recommendations |
+| Groq API | Fast LLM inference |
+| Llama 3.3 70B Versatile | Cost analysis and optimization recommendations |
 
 ---
 
@@ -53,18 +54,19 @@ A serverless AWS cost monitoring dashboard powered by Groq AI (Llama 3.3) that f
 ```
 Browser
    ↓
-React frontend (localhost / S3 + CloudFront)
+React (localhost dev / S3 + CloudFront prod)
    ↓
-API Gateway (REST · CORS)
-   ↓                    ↓
-getCosts Lambda    getInsights Lambda
-   ↓                    ↓              ↓
-Cost Explorer      Groq API        DynamoDB
-API                Llama 3.3       (cache · 24hr TTL)
-        ↑
-EventBridge (cron · daily 6AM UTC)
-→ scheduledRefresh Lambda
-→ pre-warms DynamoDB cache
+API Gateway  ──────────────────────────────┐
+   ↓                                       ↓
+getCosts Lambda                    getInsights Lambda
+   ↓              ↓                        ↓              ↓
+Cost Explorer   DynamoDB            Groq Llama 3.3    DynamoDB
+API             (read/write cache)  (AI analysis)     (read/write cache)
+
+EventBridge (6AM UTC daily)
+   → scheduledRefresh Lambda
+   → Cost Explorer → DynamoDB
+   → Groq → DynamoDB
 ```
 
 ---
@@ -75,26 +77,25 @@ EventBridge (cron · daily 6AM UTC)
 aws-cost-dashboard/
 ├── src/
 │   ├── handlers/
-│   │   ├── getCosts.js           # Fetches AWS billing data
-│   │   ├── getInsights.js        # Generates AI cost analysis
-│   │   └── scheduledRefresh.js   # Daily cache pre-warm
+│   │   ├── getCosts.js           # Fetches and caches billing data
+│   │   ├── getInsights.js        # Generates and caches AI analysis
+│   │   └── scheduledRefresh.js   # Daily pre-warm of both caches
 │   └── lib/
-│       ├── costExplorer.js       # Cost Explorer API wrapper
+│       ├── costExplorer.js       # AWS Cost Explorer wrapper
 │       ├── gemini.js             # Groq AI wrapper (Llama 3.3)
-│       └── dynamo.js             # DynamoDB cache helper
+│       └── dynamo.js             # DynamoDB read/write helpers
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js
 │   │   └── components/
-│   │       ├── CostChart.jsx     # Bar chart by service
-│   │       ├── InsightPanel.jsx  # AI insights panel
+│   │       ├── CostChart.jsx     # Recharts bar chart
+│   │       ├── InsightPanel.jsx  # AI insight panel
 │   │       └── ServiceTable.jsx  # Cost breakdown table
-│   ├── .env                      # Local env vars (not committed)
-│   └── .env.example              # Template for contributors
-├── template.yaml                 # AWS SAM infrastructure definition
-├── samconfig.toml                # SAM deploy configuration
-├── .gitignore
-└── README.md
+│   ├── .env                      # API URL (not committed)
+│   └── .env.example              # Template
+├── template.yaml                 # SAM infrastructure definition
+├── samconfig.toml                # SAM deploy config
+└── .gitignore
 ```
 
 ---
@@ -102,16 +103,16 @@ aws-cost-dashboard/
 ## Prerequisites
 
 - Node.js 20+
-- AWS CLI ([install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html))
-- AWS SAM CLI ([install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
+- AWS CLI — [install](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) + run `aws configure`
+- AWS SAM CLI — [install](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 - Groq API key — free at [console.groq.com](https://console.groq.com)
-- AWS account with Cost Explorer enabled
+- AWS account with Cost Explorer activated
 
 ---
 
-## Using This Project in Your Own AWS Account
+## Setup
 
-### 1. Clone the repo
+### 1. Clone
 
 ```bash
 git clone <your-repo-url>
@@ -124,28 +125,27 @@ cd aws-cost-dashboard
 npm install
 ```
 
-### 3. Deploy the backend
+### 3. Deploy to AWS
 
 ```bash
 sam build
 sam deploy --guided
 ```
 
-When prompted:
-- Stack name: `aws-cost-dashboard`
-- Region: your preferred region (e.g. `us-east-1`)
-- GeminiApiKey: paste your Groq API key (`gsk_...`)
-- Accept all other defaults
+Enter when prompted:
 
-### 4. Copy the API endpoint
+| Prompt | Value |
+|---|---|
+| Stack name | `aws-cost-dashboard` |
+| Region | `us-east-1` (or your preferred region) |
+| GeminiApiKey | Your Groq API key (`gsk_...`) |
+| Confirm changes | `y` |
+| Allow IAM role creation | `y` |
+| Save to samconfig.toml | `y` |
 
-After deploy completes, copy the `ApiEndpoint` value from the outputs:
+Copy the `ApiEndpoint` URL from the deploy output.
 
-```
-ApiEndpoint: https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/Prod/
-```
-
-### 5. Set up the frontend
+### 4. Configure the frontend
 
 ```bash
 cd frontend
@@ -153,31 +153,29 @@ npm install
 cp .env.example .env
 ```
 
-Open `.env` and paste your API endpoint:
+Paste your API endpoint into `.env`:
 
 ```
 REACT_APP_API_URL=https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/Prod
 ```
 
-### 6. Run locally
+### 5. Run
 
 ```bash
 npm start
 ```
 
-Dashboard opens at `http://localhost:3000`
+Opens at `http://localhost:3000`
 
 ---
 
-## API Endpoints
+## API Reference
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/costs` | Returns cost breakdown by service for current month |
-| GET | `/insights` | Returns AI-generated cost analysis (cached 24hrs) |
+### GET /costs
 
-### Example — `/costs` response
+Returns current month's AWS spend grouped by service, sorted by cost descending.
 
+**Response**
 ```json
 {
   "source": "live",
@@ -189,12 +187,17 @@ Dashboard opens at `http://localhost:3000`
 }
 ```
 
-### Example — `/insights` response
+`source` is either `live` (fresh from Cost Explorer) or `cache` (served from DynamoDB).
 
+### GET /insights
+
+Returns an AI-generated cost analysis for the current month. Cached per day.
+
+**Response**
 ```json
 {
   "source": "live",
-  "insight": "## AWS Cost Summary\n\nYour total spend this month is $101.13 across 8 services..."
+  "insight": "## AWS Cost Summary\n\nYour total spend this month is $101.13..."
 }
 ```
 
@@ -202,89 +205,76 @@ Dashboard opens at `http://localhost:3000`
 
 ## Environment Variables
 
-### Frontend (`frontend/.env`)
+### Frontend — `frontend/.env`
 
 | Variable | Description |
 |---|---|
-| `REACT_APP_API_URL` | Your deployed API Gateway endpoint URL |
+| `REACT_APP_API_URL` | API Gateway endpoint from SAM deploy output |
 
-### Backend (managed by AWS SAM)
+### Backend — managed by SAM
 
 | Variable | Description |
 |---|---|
-| `REPORTS_TABLE` | DynamoDB table name (auto-set by SAM) |
-| `GEMINI_API_KEY` | Groq API key (passed as SAM parameter, stored securely) |
+| `REPORTS_TABLE` | DynamoDB table name (injected automatically by SAM) |
+| `GEMINI_API_KEY` | Groq API key (passed as encrypted SAM parameter) |
 
 ---
 
-## Caching Strategy
+## Caching
 
-To minimize costs and API rate limits:
+| Data | Cache key | TTL |
+|---|---|---|
+| Cost breakdown | `costs-current-current` | 24 hours |
+| AI insights | `insights-YYYY-MM-DD` | 24 hours |
 
-- Cost data cached in DynamoDB with 24-hour TTL
-- AI insights cached per day — one Groq call per day maximum
-- EventBridge pre-warms cache every morning at 6AM UTC so dashboard loads instantly
-- Cache key format: `costs-current-current`, `insights-YYYY-MM-DD`
+The EventBridge scheduler runs `scheduledRefresh` at 6AM UTC every day, fetching fresh data and pre-generating the day's AI insight so the first user request of the day is instant.
 
 ---
 
 ## Useful Commands
 
 ```bash
-# Rebuild and redeploy after code changes
+# Redeploy after changes
 sam build && sam deploy
 
-# Deploy with a new Groq API key
+# Redeploy with a new Groq API key
 sam deploy --parameter-overrides GeminiApiKey=YOUR_NEW_KEY
 
-# View Lambda logs
-sam logs -n GetCostsFunction --stack-name aws-cost-dashboard
-sam logs -n GetInsightsFunction --stack-name aws-cost-dashboard
+# Stream live Lambda logs
+sam logs -n GetCostsFunction --stack-name aws-cost-dashboard --tail
+sam logs -n GetInsightsFunction --stack-name aws-cost-dashboard --tail
 
-# Test locally (requires Docker)
+# Run Lambda functions locally (requires Docker)
 sam local start-api
 
-# Delete the entire stack from AWS
+# Tear down the entire stack
 sam delete --stack-name aws-cost-dashboard
 ```
 
 ---
 
-## AWS Cost of Running This Project
+## Running Cost Estimate
 
-| Service | Estimated Cost |
+| Service | Monthly cost |
 |---|---|
-| Lambda | ~$0 (free tier: 1M requests/month) |
-| API Gateway | ~$0 (free tier: 1M requests/month) |
-| DynamoDB | ~$0 (free tier: 25GB storage) |
-| Cost Explorer API | $0.01 per API call |
-| EventBridge | ~$0 (free tier: 14M events/month) |
-| Groq API | Free tier available |
+| Lambda | $0 — free tier covers 1M requests |
+| API Gateway | $0 — free tier covers 1M requests |
+| DynamoDB | $0 — free tier covers 25GB |
+| Cost Explorer API | $0.01 per API request |
+| EventBridge | $0 — free tier covers 14M events |
+| Groq API | $0 — free tier |
 
-**Estimated monthly cost: < $1**
-
----
-
-## Roadmap
-
-- [ ] Cognito authentication + protected routes
-- [ ] Natural language chat — ask questions about your spend
-- [ ] Cost forecast for next 30 days
-- [ ] Budget threshold alerts via SES email
-- [ ] S3 + CloudFront frontend deployment
-- [ ] GitHub Actions CI/CD pipeline
-- [ ] Docker support for local development
-- [ ] Cost anomaly detection
+**Total: under $1/month**
 
 ---
 
 ## Contributing
 
 1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m 'add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
+2. Create a branch — `git checkout -b feature/your-feature`
+3. Commit — `git commit -m "add your feature"`
+4. Push — `git push origin feature/your-feature`
+5. Open a pull request
 
 ---
 
